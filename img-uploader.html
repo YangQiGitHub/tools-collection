@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>img uploader</title>
+	<style>
+		body {
+			margin: 20px;
+		}
+		.img-uploader__label {
+			display: inline-flex;
+			width: 150px;
+			height: 150px;
+			border: 2px solid #eee;
+			border-radius: 6px;
+			position: relative;
+			cursor: pointer;
+			justify-content: center;
+			align-items: center;
+		}
+		.img-uploader__label:before {
+			content: '';
+			display: block;
+			position: absolute;
+			left: 50%;
+			top: 50%;
+			transform: translate(-50%, -50%);
+			transform-origin: 50%;
+			width: 70px;
+			height: 4px;
+			background-color: #eee;
+		}
+		.img-uploader__label:after {
+			content: '';
+			display: block;
+			position: absolute;
+			left: 50%;
+			top: 50%;
+			transform: translate(-50%, -50%);
+			transform-origin: 50%;
+			width: 4px;
+			height: 70px;
+			background-color: #eee;
+		}
+		.img-uploader__label .img-filler {
+			display: none;
+			max-height: 100%;
+			max-width: 100%;
+		}
+		.img-uploader__label.img-filled:before { display: none; }
+		.img-uploader__label.img-filled:after { display: none; }
+		.img-uploader__label.img-filled .img-filler {
+			display: block;
+		}
+		#img-uploader {
+			display: none;
+		}
+	</style>
+</head>
+<body>
+	<label id="img-uploader__label" class="img-uploader__label" for="img-uploader">
+		<img id="img-filler" class="img-filler"/>
+	</label>
+	<input id="img-uploader" type="file" accept="image/*"/>
+
+	<script>
+		function bindEvent(ele, type, fn, options = {}) {
+			const maps = [{
+				key: 'addEventListener',
+				bindFn() {
+					ele.addEventListener(type, fn, options.useCatch || false);
+				}
+			}, {
+				key: 'attachEvent',
+				bindFn() {
+					ele.attachEvent(`on${type}`, fn);
+				}
+			}, {
+				key: `on${type}`,
+				bindFn() {
+					ele[`on${type}`] = fn;
+				}
+			}];
+			maps.find(item => {
+				return ele[item.key]
+			}).bindFn();
+		}	
+		class ImgUploader {
+			constructor(id, relateLabelId, relateImgId, options = {}) {
+				this._init(id, relateLabelId, relateImgId, options)
+				bindEvent(this._ele, 'change', this._eventHandle.bind(this));
+			}
+			_init(id, relateLabelId, relateImgId, {
+				maxSize = 2,
+				maxWidth = 1300,
+				maxHeight = 1300
+			}) {
+				this._ele = document.getElementById(id);
+				this._relateLabel = document.getElementById(relateLabelId);
+				this._relateImg = document.getElementById(relateImgId);
+				this._maxSize = maxSize * 1024 * 1024;
+				this._maxWidth = maxWidth;
+				this._maxHeight = maxHeight;
+			}
+			async _base64(file) {
+				return await new Promise(resolve => {
+					const fr = new FileReader();
+					fr.addEventListener('load', () => {
+						resolve(fr.result)
+					}, false);
+					fr.readAsDataURL(file);
+				});
+			}
+			async _makeImg(base64) {
+				const img = new Image();
+				await new Promise(resolve => {
+					img.onload = resolve;
+					img.src = base64;
+				});
+				return img;
+			}
+			_makeTargetSize(img) {
+				const originWidth = img.naturalWidth || img.width;
+				const originHeight = img.naturalHeight || img.height;
+				const maxWidth = this._maxWidth;
+				const maxHeight = this._maxHeight;
+				const res = { width: originWidth, height: originHeight };
+				if (originWidth <= maxWidth && originHeight <= maxHeight) return res;
+				const scale = (originWidth / maxWidth) > (originHeight / maxHeight) ? (originWidth / maxWidth) : (originHeight / maxHeight);
+        res.width = Math.round(originWidth / scale)
+        res.height = Math.round(originHeight / scale)
+				return res;
+			}
+			_makeCompressedDataURI(img, w, h) {
+				const canvas = document.createElement('canvas');
+				const context = canvas.getContext('2d');
+				canvas.width = w;
+				canvas.height = h;
+				context.clearRect(0, 0, w, h);
+				context.drawImage(img, 0, 0, w, h);
+				return canvas.toDataURL();
+			}
+			_dataURI2Blob(dataURI, type) {
+				// convert base64 to raw binary data held in a string
+				// doesn't handle URLEncoded DataURIs - see SO answer #6850276 for code that does this
+				const byteString = atob(dataURI.split(',')[1]);
+
+				// write the bytes of the string to an ArrayBuffer
+				const ab = new ArrayBuffer(byteString.length);
+				const ia = new Uint8Array(ab);
+				for (let i = 0; i < byteString.length; i++) {
+					ia[i] = byteString.charCodeAt(i);
+				}
+
+				return new Blob([ab], {type});
+			}
+			async _compress(file) {
+				if (file.size <= this._maxSize) return file;
+				// 将文件base64化
+				const base64 = await this._base64(file);
+				// 通过base64生成一个image
+				const img = await this._makeImg(base64);
+				// 按最大长宽和image的长宽生成压缩后图片应有的长宽
+				const { width, height } = this._makeTargetSize(img);
+				// 通过将image画进一个较小长宽的canvas内，来进行压缩，并将压缩后的base64吐出
+				const dataURI = this._makeCompressedDataURI(img, width, height);
+				// 将base64转成blob
+				return this._dataURI2Blob(dataURI, file.type);
+			}
+			async _upload(blob, file) {
+				const fd = new FormData();
+				fd.append('file', blob, file.name);
+				// 用fetch或XMLHttpRequest上传formData
+				// 并返回结果
+				// 以下是假数据
+				return await {
+					code: 200,
+					message: 'ok',
+					data: {
+						url: 'https://ss1.baidu.com/6ONXsjip0QIZ8tyhnq/it/u=1422082189,3177965149&fm=173&app=25&f=JPG?w=530&h=276&s=359EEC32095958C854FD45CE0000C0B2'
+					}
+				}
+			}
+			async _eventHandle(e) {
+				const file = e.target.files[0];
+				// 如果size过大，则按给定的最大长宽和原图片比例进行压缩
+				const blob = await this._compress(file);
+				// 上传
+				const result = await this._upload(blob, file);
+				// 回显
+				this._relateImg.src = result.data.url;
+				this._relateLabel.classList.add('img-filled');
+			}
+		}	
+	</script>
+	<script>
+		const iu = new ImgUploader('img-uploader', 'img-uploader__label', 'img-filler', { maxSize: 0.000001 });
+	</script>
+</body>
+</html>
